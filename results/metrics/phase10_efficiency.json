@@ -1,0 +1,35 @@
+{
+  "GRU_baseline": {
+    "params": 24051,
+    "disk_kb": 97.7236328125,
+    "latency": {
+      "mean_ms": 1.1127909993520007,
+      "p95_ms": 1.8610100261867046,
+      "min_ms": 0.6030999938957393
+    },
+    "onnx": {
+      "exported": true,
+      "size_kb": 5.8935546875,
+      "max_abs_diff": 0.0
+    },
+    "batch64_ms": 3.006034000427462,
+    "throughput_samples_per_s": 21290.511015809905
+  },
+  "ImprovedGRU": {
+    "params": 10733,
+    "disk_kb": 46.9697265625,
+    "latency": {
+      "mean_ms": 0.9095983995357528,
+      "p95_ms": 1.1888849723618475,
+      "min_ms": 0.707999977748841
+    },
+    "onnx": {
+      "exported": true,
+      "size_kb": 6.8154296875,
+      "max_abs_diff": 0.0
+    },
+    "batch64_ms": 2.680233000428416,
+    "throughput_samples_per_s": 23878.52100536411
+  },
+  "process_memory_mb": null
+}
