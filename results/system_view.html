@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Hydroponic System — Live Sensor View</title>
+<style>
+  :root{--bg:#0d1420;--panel:#15203400;--line:#26324c;--txt:#e8eefc;
+    --muted:#8ea0c0;--green:#26d07c;--blue:#4aa3ff;--amber:#f5b544;--red:#ff5d6c;}
+  *{box-sizing:border-box;font-family:'Segoe UI',system-ui,Arial,sans-serif}
+  body{margin:0;background:var(--bg);color:var(--txt)}
+  header{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;
+    justify-content:space-between;align-items:center}
+  header h1{font-size:17px;margin:0}
+  header .sub{font-size:12px;color:var(--muted);margin-top:2px}
+  .controls{display:flex;gap:10px;align-items:center}
+  button{background:#1d2942;color:var(--txt);border:1px solid var(--line);
+    border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px}
+  button:hover{background:#26344f}
+  .badge{background:#1d2942;border:1px solid var(--line);border-radius:20px;
+    padding:6px 12px;font-size:12px;color:var(--muted)}
+  .wrap{display:grid;grid-template-columns:1fr 340px;gap:16px;padding:16px 22px}
+  .card{background:#15203a;border:1px solid var(--line);border-radius:14px;padding:14px}
+  .card h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--muted);margin:0 0 10px}
+  svg{width:100%;height:auto;display:block}
+  .kpi{display:flex;justify-content:space-between;margin:8px 0;font-size:13px}
+  .kpi .l{color:var(--muted)} .kpi .v{font-weight:700}
+  .mode{display:inline-block;padding:4px 12px;border-radius:20px;font-weight:700;font-size:12px}
+  .mode.PHYSICAL{background:rgba(74,163,255,.16);color:var(--blue)}
+  .mode.VIRTUAL{background:rgba(38,208,124,.16);color:var(--green)}
+  .alert{background:rgba(255,93,108,.13);border:1px solid var(--red);color:var(--red);
+    border-radius:9px;padding:8px 12px;font-size:13px;font-weight:600;margin-top:8px;visibility:hidden}
+  .alert.show{visibility:visible}
+  .legend{display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:var(--muted);margin-top:8px}
+  .legend span{display:flex;align-items:center;gap:5px}
+  .dot{width:10px;height:10px;border-radius:50%}
+  .foot{color:var(--muted);font-size:11px;padding:0 22px 18px}
+  .gauge-num{font-size:30px;font-weight:800}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>🌱 Hydroponic System — Live Sensor View</h1>
+    <div class="sub">Watch the virtual pH sensor work: probe rests (green) when confident, activates (blue) when needed, and takes over when a sensor fails.</div></div>
+  <div class="controls">
+    <span class="badge" id="clock">t = 0</span>
+    <button id="playBtn">⏸ Pause</button>
+    <button id="speedBtn">1×</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <h2>System schematic (live)</h2>
+    <svg id="scene" viewBox="0 0 760 460" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="legend">
+      <span><i class="dot" style="background:var(--green)"></i>pH probe resting (virtual mode)</span>
+      <span><i class="dot" style="background:var(--blue)"></i>pH probe active (physical read)</span>
+      <span><i class="dot" style="background:var(--red)"></i>sensor fault</span>
+      <span><i class="dot" style="background:var(--amber)"></i>actuator firing</span>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>Reported pH</h2>
+      <div><span class="gauge-num" id="phval">–</span> <span style="color:var(--muted)">pH</span></div>
+      <div style="margin-top:8px">Mode: <span class="mode VIRTUAL" id="modebadge">VIRTUAL</span></div>
+      <div class="alert" id="alert">⚠ SENSOR FAULT — virtual sensor carrying the load</div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h2>Live sensor readings</h2>
+      <div class="kpi"><span class="l">pH (true)</span><span class="v" id="s_ph">–</span></div>
+      <div class="kpi"><span class="l">TDS (nutrients)</span><span class="v" id="s_tds">–</span></div>
+      <div class="kpi"><span class="l">Water temp</span><span class="v" id="s_wtemp">–</span></div>
+      <div class="kpi"><span class="l">Air temp</span><span class="v" id="s_air">–</span></div>
+      <div class="kpi"><span class="l">Humidity</span><span class="v" id="s_hum">–</span></div>
+      <div class="kpi"><span class="l">Water level</span><span class="v" id="s_lvl">–</span></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h2>Model confidence</h2>
+      <div style="height:12px;border-radius:8px;background:#1d2942;overflow:hidden">
+        <div id="conffill" style="height:100%;width:80%;background:linear-gradient(90deg,var(--red),var(--amber),var(--green))"></div></div>
+      <div class="kpi" style="margin-top:6px"><span class="l">confidence</span><span class="v" id="confpct">–</span></div>
+      <div class="kpi"><span class="l">physical probe used</span><span class="v" id="usePct">–</span></div>
+      <div class="kpi"><span class="l">probe reads saved</span><span class="v" id="saved" style="color:var(--green)">–</span></div>
+    </div>
+  </div>
+</div>
+<div class="foot" id="foot">Loading demo_data.json …</div>
+
+<script>
+const S={data:null,i:0,playing:true,speed:1,physReads:0,steps:0};
+const NS="http://www.w3.org/2000/svg";
+function el(tag,attrs){const e=document.createElementNS(NS,tag);
+  for(const k in attrs)e.setAttribute(k,attrs[k]);return e;}
+function fmt(x,d=2){return (x==null||isNaN(x))?'–':(+x).toFixed(d);}
+
+// ---- build the static scene once ----
+const scene=document.getElementById('scene');
+function txt(x,y,s,cls,size){const t=el('text',{x,y,'font-size':size||12,
+  fill:cls||'#cdd8ee','text-anchor':'middle','font-family':'Segoe UI'});
+  t.textContent=s;scene.appendChild(t);return t;}
+
+// tank
+scene.appendChild(el('rect',{x:150,y:150,width:420,height:230,rx:10,
+  fill:'#0f1e33',stroke:'#2a3a58','stroke-width':2}));
+// water body (animated level)
+const water=el('rect',{x:154,y:250,width:412,height:126,rx:6,fill:'#123a5c',opacity:.75});
+scene.appendChild(water);
+// waterline shimmer
+const waterline=el('rect',{x:154,y:250,width:412,height:4,fill:'#4aa3ff',opacity:.6});
+scene.appendChild(waterline);
+// plants on top
+for(let k=0;k<5;k++){const px=210+k*80;
+  scene.appendChild(el('rect',{x:px-4,y:120,width:8,height:34,fill:'#3c7d3c'}));
+  scene.appendChild(el('circle',{cx:px,cy:118,r:16,fill:'#2f9e44'}));
+  scene.appendChild(el('circle',{cx:px-10,cy:126,r:11,fill:'#37b24d'}));
+  scene.appendChild(el('circle',{cx:px+10,cy:126,r:11,fill:'#37b24d'}));}
+txt(360,145,'Deep-Water-Culture tank','#8ea0c0',12);
+
+// --- pH probe (the star) ---
+const probeBody=el('rect',{x:250,y:210,width:10,height:120,rx:4,fill:'#26d07c'});
+scene.appendChild(probeBody);
+const probeGlow=el('circle',{cx:255,cy:335,r:12,fill:'#26d07c',opacity:.9});
+scene.appendChild(probeGlow);
+const phLabel=txt(255,200,'pH','#26d07c',13);
+
+// --- other sensors ---
+function sensorIcon(x,label,id){
+  scene.appendChild(el('rect',{x:x-8,y:215,width:16,height:110,rx:3,fill:'#33507a'}));
+  const g=el('circle',{cx:x,cy:330,r:8,fill:'#4aa3ff'});g.setAttribute('id',id);
+  scene.appendChild(g);
+  txt(x,205,label,'#8ea0c0',11);}
+sensorIcon(320,'TDS','ic_tds');
+sensorIcon(380,'W°','ic_wtemp');
+sensorIcon(440,'Lvl','ic_lvl');
+// air sensors (above water)
+scene.appendChild(el('rect',{x:512,y:150,width:40,height:26,rx:5,fill:'#33507a'}));
+txt(532,167,'DHT','#cdd8ee',11);
+
+// --- actuators (pumps / fan) on the right ---
+function actuator(y,label,id){
+  const r=el('rect',{x:610,y:y,width:120,height:40,rx:8,fill:'#1d2942',
+    stroke:'#2a3a58','stroke-width':1.5});r.setAttribute('id',id);
+  scene.appendChild(r);
+  txt(670,y+25,label,'#cdd8ee',12);
+  return r;}
+const aAcid=actuator(160,'Acid pump','a_acid');
+const aWater=actuator(210,'Water pump','a_water');
+const aNut=actuator(260,'Nutrient pump','a_nut');
+const aFan=actuator(310,'Exhaust fan','a_fan');
+// pipes from actuators to tank
+scene.appendChild(el('path',{d:'M610 180 L570 250',stroke:'#2a3a58','stroke-width':2,fill:'none'}));
+
+// controller box
+scene.appendChild(el('rect',{x:20,y:230,width:110,height:70,rx:10,fill:'#17223a',
+  stroke:'#2a3a58','stroke-width':1.5}));
+txt(75,258,'Raspberry Pi','#cdd8ee',11);
+txt(75,276,'GRU virtual','#8ea0c0',10);
+txt(75,290,'pH sensor','#8ea0c0',10);
+// wire pi -> probe
+scene.appendChild(el('path',{d:'M130 265 L250 270',stroke:'#2a3a58','stroke-width':2,fill:'none'}));
+
+fetch('demo_data.json').then(r=>r.json()).then(d=>{
+  S.data=d;
+  document.getElementById('foot').textContent=
+    'Replaying '+d.stream.length+' steps of the leakage-free test stream with injected sensor faults. '
+    +'Physical-probe usage reduction (steady state): '+d.summary.usage_reduction_steady_pct+'%.';
+  requestAnimationFrame(loop);
+}).catch(e=>{document.getElementById('foot').textContent='Could not load demo_data.json — run: python src/phase12_export_demo.py';});
+
+document.getElementById('playBtn').onclick=()=>{S.playing=!S.playing;
+  document.getElementById('playBtn').textContent=S.playing?'⏸ Pause':'▶ Play';
+  if(S.playing)requestAnimationFrame(loop);};
+document.getElementById('speedBtn').onclick=()=>{
+  S.speed=S.speed===1?2:S.speed===2?4:1;
+  document.getElementById('speedBtn').textContent=S.speed+'×';};
+
+function setActuator(elm,on){elm.setAttribute('fill',on?'#f5b544':'#1d2942');
+  elm.setAttribute('stroke',on?'#f5b544':'#2a3a58');}
+
+function render(p){
+  document.getElementById('clock').textContent='t = '+p.t;
+  document.getElementById('phval').textContent=fmt(p.system,2);
+  document.getElementById('s_ph').textContent=p.fault?'FAULT ('+p.ftype+')':fmt(p.true,2);
+  document.getElementById('s_tds').textContent=fmt(p.tds,0)+' ppm';
+  document.getElementById('s_wtemp').textContent=fmt(p.wtemp,1)+' °C';
+  document.getElementById('s_air').textContent=fmt(p.airtemp,1)+' °C';
+  document.getElementById('s_hum').textContent=fmt(p.humidity,0)+' %';
+  document.getElementById('s_lvl').textContent=fmt(p.level,2);
+
+  // confidence
+  const c=Math.round((p.conf||0)*100);
+  document.getElementById('conffill').style.width=c+'%';
+  document.getElementById('confpct').textContent=c+'%';
+
+  // mode + probe visual
+  const mb=document.getElementById('modebadge');mb.textContent=p.mode;mb.className='mode '+p.mode;
+  const virtual=(p.mode==='VIRTUAL');
+  // probe color: green=resting(virtual), blue=active(physical), red=fault
+  let col=virtual?'#26d07c':'#4aa3ff';
+  if(p.fault)col='#ff5d6c';
+  probeBody.setAttribute('fill',col);
+  probeGlow.setAttribute('fill',col);
+  probeGlow.setAttribute('r', virtual?8:14);       // pulse bigger when active
+  probeGlow.setAttribute('opacity', virtual?0.5:0.95);
+  phLabel.setAttribute('fill',col);
+
+  // alert
+  document.getElementById('alert').classList.toggle('show', p.fault||p.conf<0.5);
+
+  // water level height
+  const lvl=Math.max(0,Math.min(3,p.level||1))/3;      // 0..1
+  const h=60+lvl*66;
+  water.setAttribute('y',376-h);water.setAttribute('height',h);
+  waterline.setAttribute('y',376-h);
+
+  // actuators
+  setActuator(aAcid,(p.acid||0)>0.5);
+  setActuator(aWater,(p.water_pump||0)>0.5);
+  setActuator(aNut,(p.nutrient||0)>0.5);
+  setActuator(aFan,(p.fan||0)>0.5);
+
+  // usage counters
+  S.steps++; if(p.mode==='PHYSICAL'&&!p.fault)S.physReads++;
+  const usePct=100*S.physReads/S.steps;
+  document.getElementById('usePct').textContent=usePct.toFixed(1)+'%';
+  document.getElementById('saved').textContent=(100-usePct).toFixed(1)+'%';
+}
+
+function loop(){
+  if(!S.data)return;
+  render(S.data.stream[S.i]);
+  S.i=(S.i+1)%S.data.stream.length;
+  if(S.i===0){S.steps=0;S.physReads=0;}
+  if(S.playing)setTimeout(()=>requestAnimationFrame(loop),120/S.speed);
+}
+</script>
+</body>
+</html>

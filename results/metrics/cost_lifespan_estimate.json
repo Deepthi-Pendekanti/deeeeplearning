@@ -1,0 +1,24 @@
+{
+  "measured": {
+    "physical_usage_fraction": 0.2435,
+    "usage_reduction_pct": 75.6
+  },
+  "assumptions": {
+    "probe_price_usd": 45.0,
+    "baseline_life_months": 6.0,
+    "labor_per_replacement_usd": 15.0,
+    "horizon_years": 3.0
+  },
+  "estimate": {
+    "baseline_life_months": 6.0,
+    "estimated_proposed_life_months": 24.6,
+    "estimated_life_multiplier": 4.11,
+    "baseline_replacements_over_horizon": 6.0,
+    "proposed_replacements_over_horizon": 1.46,
+    "baseline_cost_usd": 360.0,
+    "proposed_cost_usd": 87.67,
+    "estimated_savings_usd": 272.33,
+    "estimated_savings_pct": 75.6
+  },
+  "disclaimer": "ESTIMATE ONLY. Based on the measured usage reduction plus a first-order usage-proportional wear assumption. Actual probe life depends on chemistry, temperature, calibration and handling; not directly measured in this project."
+}

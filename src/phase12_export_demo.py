@@ -11,7 +11,8 @@ import json
 
 import numpy as np
 
-from config import METRICS, MODELS, RESULTS
+import dataset as ds
+from config import METRICS, MODELS, RESULTS, SENSOR_FEATURES
 
 
 def load(name):
@@ -19,11 +20,25 @@ def load(name):
     return np.load(p, allow_pickle=True) if p.exists() else None
 
 
+def _test_sensor_values():
+    """Return the RAW (physical-unit) sensor + actuator values aligned to the
+    Phase-8 test stream, so the animated system diagram shows real readings."""
+    wd = ds.build(include_actuators=True, source="paper", split="temporal",
+                  verbose=False)
+    # invert MinMax on the last time step of each test window
+    last = wd.X_test[:, -1, :]                       # (N, features) scaled
+    raw = (last - wd.feature_scaler.min_) / wd.feature_scaler.scale_
+    names = wd.feature_names
+    cols = {n: raw[:, i] for i, n in enumerate(names)}
+    return cols, names
+
+
 def main():
     p7 = load("phase7_hybrid_stream.npz")
     p8 = load("phase8_failure_stream.npz")
     conf = json.load(open(METRICS / "phase7_confidence.json"))
     fail = json.load(open(METRICS / "phase8_failure.json"))
+    sensors, sensor_names = _test_sensor_values()
 
     # Use the Phase 8 stream (has faults + is the most demo-friendly).
     true = p8["true"]; virt = p8["virtual"]; prop = p8["proposed"]
@@ -48,8 +63,21 @@ def main():
     step = max(1, len(true) // 1200)
     idx = np.arange(0, len(true), step)
 
+    def sv(col, i, nd=1):
+        arr = sensors.get(col)
+        if arr is None or i >= len(arr):
+            return None
+        return round(float(arr[i]), nd)
+
+    n_align = min(len(true), *(len(v) for v in sensors.values()))
     stream = []
     for i in idx:
+        if i >= n_align:
+            break
+        # actuator "firing" = any dosing actuator active at this step
+        act_fire = any((sensors.get(a) is not None and i < len(sensors[a])
+                        and sensors[a][i] > 0.5)
+                       for a in ("pH_reducer", "add_water", "nutrients_adder"))
         stream.append({
             "t": int(i),
             "true": round(float(true[i]), 3),
@@ -59,6 +87,19 @@ def main():
             "fault": bool(is_fault[i]),
             "ftype": str(fault_type[i]),
             "mode": str(mode[i]),
+            # real sensor readings for the animated system diagram
+            "tds": sv("TDS", i, 0),
+            "wtemp": sv("water_temp", i, 1),
+            "airtemp": sv("DHT_temp", i, 1),
+            "humidity": sv("DHT_humidity", i, 0),
+            "level": sv("water_level", i, 2),
+            # actuator states (0/1)
+            "acid": sv("pH_reducer", i, 0),
+            "water_pump": sv("add_water", i, 0),
+            "nutrient": sv("nutrients_adder", i, 0),
+            "fan": sv("ex_fan", i, 0),
+            "humid_act": sv("humidifier", i, 0),
+            "dosing": bool(act_fire),
         })
 
     summary = {

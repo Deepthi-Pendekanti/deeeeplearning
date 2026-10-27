@@ -15,7 +15,6 @@ Consumes saved artifacts from Phases 4/5/7/8 and produces clean plots:
 from __future__ import annotations
 
 import json
-
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt

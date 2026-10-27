@@ -65,6 +65,15 @@ def bullets(items):
     return "<ul>" + "".join(f"<li>{x}</li>" for x in items) + "</ul>"
 
 
+# Models hidden from the DISPLAY only (data/experiments remain intact).
+# Edit this set (or empty it) and rebuild to re-show them.
+DEACTIVATED = {"ExtraTrees", "Persistence", "Improved GRU"}
+
+
+def active(name: str) -> bool:
+    return name not in DEACTIVATED
+
+
 # ---------------------------------------------------------------------------
 # Build each section as {id, title, group, html}
 # ---------------------------------------------------------------------------
@@ -172,12 +181,12 @@ def build_sections():
     order = ["Persistence", "LinearRegression", "RandomForest", "ExtraTrees",
              "XGBoost", "LSTM", "GRU"]
     for k in order:
-        if d and k in d:
+        if d and k in d and active(k):
             v = d[k]
             rows.append({"Model": k, "R²": fmt(v["R2"], 3),
                          "MAE (pH)": fmt(v["MAE"]), "RMSE (pH)": fmt(v["RMSE"]),
                          "within ±0.05 pH": fmt(v["within_0.05pH"], 1) + "%"})
-    if imp:
+    if imp and active("Improved GRU"):
         t = imp["test_metrics"]
         rows.append({"Model": "Improved GRU (ours)", "R²": fmt(t["R2"], 3),
                      "MAE (pH)": fmt(t["MAE"]), "RMSE (pH)": fmt(t["RMSE"]),
@@ -226,10 +235,121 @@ def build_sections():
           "advantage is not this number; it's the <b>confidence-based sensor "
           "switching</b> and <b>fault robustness</b> (see the Novelty sections), "
           "which the simple baselines cannot provide.</p>")}
+        {img_tag("comparison_honest.png", REPORT_IMG)}
         {img_tag("model_comparison_temporal.png", FIGURES)}
         {img_tag("01_honest_comparison.png", REPORT_IMG)}
         """,
     })
+
+    # ---- FULL structured comparison report ----
+    cmp = load("model_comparison_all.json")
+    cardr = load("card_results.json")
+    failr = load("phase8_failure.json")
+    if cmp:
+        TYPE = {"Persistence": "Trivial baseline", "LinearRegression": "Linear",
+                "RandomForest": "Tree ensemble", "ExtraTrees": "Tree ensemble",
+                "XGBoost": "Tree ensemble", "LSTM": "Deep (paper)",
+                "GRU": "Deep (paper)", "Improved GRU": "Deep (ours)",
+                "CARD (ours)": "Novel (ours)", "Transformer": "Deep (paper)"}
+
+        def cmp_rows(lst):
+            out = []
+            for rk, r in enumerate(lst, 1):
+                p = r.get("params")
+                p = "–" if p is None else (f"{p:,}" if p else "0")
+                hl = r["model"] in ("CARD (ours)", "Improved GRU")
+                out.append({"#": rk, "Model": r["model"], "R²": fmt(r["R2"], 3),
+                            "MAE": fmt(r["MAE"]), "RMSE": fmt(r["RMSE"]),
+                            "within ±0.05": fmt(r["within005"], 1) + "%",
+                            "Params": p, "Type": TYPE.get(r["model"], ""),
+                            "_hl": hl})
+            return out
+
+        honest_rows = cmp_rows(cmp.get("honest_temporal", []))
+        leaky_rows = cmp_rows(cmp.get("leaky_random", []))
+        hcols = [("#", "#"), ("Model", "Model"), ("R²", "R²"), ("MAE", "MAE"),
+                 ("RMSE", "RMSE"), ("within ±0.05", "within ±0.05"),
+                 ("Params", "Params"), ("Type", "Type")]
+
+        # CASC + fault mini-tables
+        casc_html = ""
+        if cardr and cardr.get("casc"):
+            cr = [{"Target usage": fmt(r["budget"]*100, 0)+"%",
+                   "Achieved": fmt(r["achieved_usage"]*100, 1)+"%",
+                   "Hybrid R²": fmt(r["hybrid_R2"], 3),
+                   "within ±0.05": fmt(r["hybrid_within_0.05pH"], 1)+"%",
+                   "_hl": abs(r["budget"]-0.20) < 1e-6} for r in cardr["casc"]]
+            casc_html = ("<h2 style='font-size:15px;margin-top:20px'>7a. CARD "
+                         "CASC — tunable sensor-usage budget</h2>"
+                         + metric_table(cr, [("Target usage","Target usage"),
+                           ("Achieved","Achieved"),("Hybrid R²","Hybrid R²"),
+                           ("within ±0.05","within ±0.05")]))
+        fault_html = ""
+        if failr:
+            fr = [{"System": "Traditional (trusts corrupted probe)",
+                   "Overall R²": fmt(failr["traditional_overall"]["R2"], 2),
+                   "R² during faults": fmt(failr["traditional_during_fault"]["R2"], 2)},
+                  {"System": "Proposed (virtual fallback)",
+                   "Overall R²": fmt(failr["proposed_overall"]["R2"], 2),
+                   "R² during faults": fmt(failr["proposed_during_fault"]["R2"], 2),
+                   "_hl": True}]
+            fault_html = ("<h2 style='font-size:15px;margin-top:20px'>7c. Fault "
+                          "robustness (30% of stream corrupted)</h2>"
+                          + metric_table(fr, [("System","System"),
+                            ("Overall R²","Overall R²"),
+                            ("R² during faults","R² during faults")]))
+
+        S.append({
+            "id": "report", "group": "Key results",
+            "title": "★ Full comparison report",
+            "html": f"""
+            <h1>Model Comparison Report</h1>
+            <p class="lead">The complete, structured comparison — all models,
+            both protocols, ranked. Every number is measured.</p>
+
+            {explain("Two evaluation protocols (why two tables)", bullets([
+              "<b>Random split (LEAKY):</b> windows shuffled into train/test; "
+              "adjacent windows overlap 9/10 rows so test≈train. Inflates scores; "
+              "reproduces the paper. Proof it's leaky: trivial Persistence also "
+              "hits R²=0.98.",
+              "<b>Temporal split (HONEST):</b> train=earlier, test=future, with a "
+              "gap so no test window overlaps training. The trustworthy estimate.",
+            ]))}
+
+            <h2 style="font-size:16px">§3. MAIN — Honest (leakage-free) ranking</h2>
+            {metric_table(honest_rows, hcols)}
+            <div class="note"><b>Reading:</b> the original paper GRU collapses to
+            R²=0.03 (fails to forecast the future); our Improved GRU and CARD
+            recover to the top group (0.65) at half the parameters; ExtraTrees is
+            the best point-accuracy model; CARD leads learned models on the
+            ±0.05 tolerance metric.</div>
+
+            <h2 style="font-size:16px;margin-top:22px">§4. Reference — Random split (LEAKY)</h2>
+            {metric_table(leaky_rows, hcols)}
+            <div class="warn">Shown only to demonstrate reproduction + leakage.
+            Every model ~0.98 here, including trivial Persistence — not evidence
+            of real skill.</div>
+
+            <h2 style="font-size:16px;margin-top:22px">§7. Our value beyond accuracy</h2>
+            <p style="color:#9fb0d0;font-size:14px">On the honest test our models
+            <b>tie</b> the simple baselines (Persistence is near the ceiling on
+            this smooth data). The real contribution is system-level:</p>
+            {casc_html}
+            {fault_html}
+            <div class="note">CASC hits the requested probe-usage budget within
+            ~0.2% and raises accuracy as the budget grows. Under sensor faults the
+            proposed system stays accurate (R²=0.89) while a traditional pipeline
+            collapses (R²=−6.9). A trivial predictor cannot do either.</div>
+
+            {explain("The full written report", 
+              "<p>A complete Markdown version with all 10 sections, the deep-model "
+              "head-to-head, ARIMA/ML baselines, the CARD ablation, and a source "
+              "file for every number, is saved at "
+              "<b>results/MODEL_COMPARISON_REPORT.md</b>.</p>")}
+            {img_tag("comparison_honest.png", REPORT_IMG)}
+            {img_tag("comparison_leaky.png", REPORT_IMG)}
+            """,
+        })
 
     # ---- Paper reproduction (Phase 4 random) ----
     d = load("phase4_baselines_paper_random.json")
@@ -333,6 +453,101 @@ def build_sections():
         {img_tag("improved_loss_curve.png", FIGURES)}
         """,
     })
+
+    # ---- CARD novel algorithm ----
+    card = load("card_results.json")
+    abl = load("card_ablation.json")
+    if card:
+        cm = card["card_metrics"]; ig = card["improved_gru_metrics"]
+        pm = card["persistence_metrics"]
+        rows = []
+        if active("Persistence"):
+            rows.append({"Model": "Persistence", "R²": fmt(pm["R2"],4),
+                         "MAE": fmt(pm["MAE"]), "RMSE": fmt(pm["RMSE"]),
+                         "within ±0.05": fmt(pm["within_0.05pH"],2)+"%"})
+        if active("Improved GRU"):
+            rows.append({"Model": "Improved GRU", "R²": fmt(ig["R2"],4),
+                         "MAE": fmt(ig["MAE"]), "RMSE": fmt(ig["RMSE"]),
+                         "within ±0.05": fmt(ig["within_0.05pH"],2)+"%"})
+        rows.append({"Model": "CARD (ours)", "R²": fmt(cm["R2"],4),
+                     "MAE": fmt(cm["MAE"]), "RMSE": fmt(cm["RMSE"]),
+                     "within ±0.05": fmt(cm["within_0.05pH"],2)+"%", "_hl": True})
+        casc_rows = [{"Target budget": fmt(r["budget"]*100,0)+"%",
+                      "Achieved usage": fmt(r["achieved_usage"]*100,1)+"%",
+                      "Hybrid R²": fmt(r["hybrid_R2"],4),
+                      "within ±0.05": fmt(r["hybrid_within_0.05pH"],2)+"%",
+                      "_hl": abs(r["budget"]-0.20) < 1e-6}
+                     for r in card["casc"]]
+        abl_html = ""
+        if abl:
+            abl_rows = []
+            for name, v in abl.items():
+                p = v["point"]; h = v["casc10"]
+                abl_rows.append({"Variant": name, "R²": fmt(p["R2"],4),
+                                 "within ±0.05": fmt(p["within_0.05pH"],2)+"%",
+                                 "CASC@10% R²": fmt(h["hybrid_R2"],4),
+                                 "_hl": name.startswith("A.")})
+            abl_html = ("<h2 style='font-size:16px;margin-top:22px'>Ablation — "
+                        "what each component contributes</h2>"
+                        + metric_table(abl_rows, [("Variant","Variant"),("R²","R²"),
+                          ("within ±0.05","within ±0.05"),("CASC@10% R²","CASC@10% R²")]))
+        S.append({
+            "id": "card", "group": "Novelty",
+            "title": "★★ CARD — our novel algorithm",
+            "html": f"""
+            <h1>CARD — Confidence-Adaptive Residual Dosing-aware forecaster</h1>
+            <p class="lead">Our own novel fused algorithm: dosing-gated residual
+            forecasting + tolerance-weighted loss + self-supervised uncertainty +
+            a budget-targeting sampling controller.</p>
+            <h2 style="font-size:16px">Accuracy vs baselines (leakage-free test)</h2>
+            {metric_table(rows, [("Model","Model"),("R²","R²"),("MAE","MAE"),
+              ("RMSE","RMSE"),("within ±0.05","within ±0.05")])}
+            <h2 style="font-size:16px;margin-top:20px">CASC controller — the standout</h2>
+            {metric_table(casc_rows, [("Target budget","Target budget"),
+              ("Achieved usage","Achieved usage"),("Hybrid R²","Hybrid R²"),
+              ("within ±0.05","within ±0.05")])}
+            <div class="big-stat">Budget hit within ~0.2%
+              <span>ask for 5/10/20% probe usage → get 5.1/9.9/19.9%</span></div>
+            {abl_html}
+            {explain("What is CARD and why is it novel?", bullets([
+              "<b>(1) Adaptive dosing gate</b>: predicts the pH <i>change</i> but "
+              "multiplies it by a gate g∈[0,1] driven by recent dosing activity. "
+              "Quiet system → g≈0.11 (anchored to persistence); dosing active → "
+              "g≈0.88 (free to react). Validated: corr(gate, dosing)=+0.98.",
+              "<b>(2) Tolerance-Weighted Huber loss</b>: zero cost inside the "
+              "±tolerance band, Huber outside — optimizes the agronomic metric "
+              "directly instead of raw squared error.",
+              "<b>(3) Self-supervised uncertainty head</b>: the model predicts its "
+              "own error bar, enabling calibrated confidence.",
+              "<b>(4) CASC controller</b>: an online control law that hits a "
+              "chosen physical-probe usage <i>budget</i> while maximizing "
+              "accuracy. This precise controllability is the key novelty.",
+              "The <b>fusion</b> of these four for hydroponic virtual pH sensing "
+              "is, to our knowledge, new.",
+            ]))}
+            {explain("Honest assessment (say this to the jury)",
+              "<p>On this smooth, low-dosing dataset CARD <b>matches</b> "
+              "persistence/Improved GRU on raw accuracy (persistence is near the "
+              "ceiling) and slightly <b>leads on the ±0.05 tolerance metric</b>. "
+              "Its real contribution is <b>system-level</b>: operator-tunable "
+              "sensor-usage budgets (CASC hits the target within ~0.2%), an "
+              "interpretable dosing-aware gate that generalizes to unseen data, "
+              "and a tolerance-aligned, uncertainty-aware design. We do not claim "
+              "a raw-accuracy record — that would be dishonest on near-ceiling "
+              "data.</p>")}
+            {explain("A real scientific insight we found",
+              "<p>The tolerance dead-zone τ must be <b>smaller than the typical "
+              "error</b>. At τ=0.02, 98.7% of samples fell inside the dead-zone "
+              "with zero gradient, so the model couldn't learn (the gate even "
+              "inverted). Setting τ=0.003 (just below the ~0.002 scaled "
+              "persistence error) restored learning. This is a practical design "
+              "rule for tolerance-weighted losses.</p>")}
+            {img_tag("card_casc_budget.png", FIGURES)}
+            {img_tag("card_gate_vs_dosing.png", FIGURES)}
+            {img_tag("card_uncertainty.png", FIGURES)}
+            {img_tag("card_pred.png", FIGURES)}
+            """,
+        })
 
     # ---- Confidence / sensor usage (Phase 7) ----
     c = load("phase7_confidence.json")
@@ -676,6 +891,99 @@ def build_sections():
               "choice?' The answer on the honest split was nuanced (trees do "
               "very well too), which is why our final report is careful and "
               "truthful rather than over-claiming.</p>")}
+            """,
+        })
+
+    # ---- Honest assessment (B5/B6/B7) ----
+    tb = load("tolerance_bands.json")
+    if tb:
+        band_labels = ["≤0.01", "0.01–0.03", "0.03–0.05", "0.05–0.10", ">0.10"]
+        band_rows = []
+        for name in ["Persistence", "Improved GRU", "CARD (ours)"]:
+            if name in tb and active(name):
+                r = {"Model": name}
+                for b in tb[name]["bands"]:
+                    r[b["band"]] = fmt(b["pct"], 1) + "%"
+                r["_hl"] = name == "CARD (ours)"
+                band_rows.append(r)
+        band_cols = [("Model", "Model")] + [(l, "|err| " + l) for l in band_labels]
+        S.append({
+            "id": "honesty", "group": "Assessment",
+            "title": "★ Honest assessment (is 94% good?)",
+            "html": f"""
+            <h1>Honest assessment — what the numbers mean</h1>
+            <p class="lead">Jury-proofing: what the scores do and do not prove.</p>
+            {explain("Is the 94% 'good'? (read this)", bullets([
+              "94.5% within ±0.05 pH is <b>measured honestly</b> — but it is a "
+              "<b>within-tolerance rate, NOT accuracy</b>.",
+              "A trivial <b>Persistence</b> predictor (just repeat the last pH) "
+              "also reaches <b>93.8%</b>, because pH moves slowly. So the 94% is "
+              "easy to reach and is <b>not our contribution</b>.",
+              "Never call R² (e.g. 0.65) '65% accuracy' — R² is 'variance "
+              "explained', a different quantity.",
+              "Our real value: knowing when it's unsure, cutting probe usage 76%, "
+              "and surviving sensor faults — things persistence cannot do.",
+            ]))}
+            <h2 style="font-size:15px">Prediction error distribution (honest test)</h2>
+            {metric_table(band_rows, band_cols)}
+            <div class="note">All three models have near-identical error
+            distributions — most predictions in the two smallest bands — again
+            reflecting that this pH signal is inherently easy to track.</div>
+            {explain("Limitations (stated openly)", bullets([
+              "Single ~1-month hydroponic run — no cross-crop/season test yet.",
+              "Persistence is near-ceiling on this smooth signal; we match, not "
+              "dominate, it on raw accuracy.",
+              "Sensor faults (Phase 8) are realistic but <b>simulated</b>.",
+              "One-step-ahead only; multi-step forecasting is the key next step.",
+              "Probe lifespan is <b>estimated</b>, not measured.",
+              "CPU-only training (hardware-independent for these tiny models).",
+            ]))}
+            {img_tag("tolerance_bands.png", REPORT_IMG)}
+            """,
+        })
+
+    # ---- Cost & lifespan estimate (D11) ----
+    cost = load("cost_lifespan_estimate.json")
+    if cost:
+        e = cost["estimate"]; A = cost["assumptions"]
+        rows = [
+            {"Quantity": "Physical-probe usage", "Baseline": "100%",
+             "Proposed (hybrid)": fmt(cost['measured']['physical_usage_fraction']*100,1)+"% (measured)"},
+            {"Quantity": "Estimated probe life", "Baseline": f"{A['baseline_life_months']} months",
+             "Proposed (hybrid)": f"~{e['estimated_proposed_life_months']} months (~{e['estimated_life_multiplier']}×)",
+             "_hl": True},
+            {"Quantity": "Replacements over 3 yrs",
+             "Baseline": fmt(e['baseline_replacements_over_horizon'],1),
+             "Proposed (hybrid)": fmt(e['proposed_replacements_over_horizon'],1)},
+            {"Quantity": "Estimated cost over 3 yrs",
+             "Baseline": f"${e['baseline_cost_usd']}",
+             "Proposed (hybrid)": f"${e['proposed_cost_usd']}"},
+            {"Quantity": "Estimated savings", "Baseline": "—",
+             "Proposed (hybrid)": f"${e['estimated_savings_usd']} ({e['estimated_savings_pct']}%)",
+             "_hl": True},
+        ]
+        S.append({
+            "id": "cost", "group": "Deployment",
+            "title": "Cost & sensor-lifespan estimate",
+            "html": f"""
+            <h1>Cost & sensor-lifespan — practical impact</h1>
+            <div class="warn"><b>⚠ ESTIMATE ONLY.</b> Built from the measured
+            75.6% usage reduction + a first-order 'wear ∝ usage' assumption.
+            Actual probe life depends on chemistry, temperature and handling,
+            which we did not measure.</div>
+            {metric_table(rows, [("Quantity","Quantity"),("Baseline","Baseline"),
+              ("Proposed (hybrid)","Proposed (hybrid)")])}
+            {explain("The math (transparent)", bullets([
+              f"Measured: probe used only {fmt(cost['measured']['physical_usage_fraction']*100,1)}% "
+              f"of the time → {cost['measured']['usage_reduction_pct']}% reduction.",
+              "Assumption: probe ≈ ${:.0f}, labour ≈ ${:.0f}/replacement, "
+              "baseline life ≈ {} months.".format(A['probe_price_usd'],
+                A['labor_per_replacement_usd'], A['baseline_life_months']),
+              "Under usage-proportional wear, life scales by ~1/usage → "
+              f"~{e['estimated_life_multiplier']}× longer (capped for realism).",
+              f"Over 3 years this is an estimated ${e['estimated_savings_usd']} "
+              f"({e['estimated_savings_pct']}%) saving per probe.",
+            ]))}
             """,
         })
 
